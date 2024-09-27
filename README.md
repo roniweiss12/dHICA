@@ -1,7 +1,7 @@
 dHICA
 ===============
 
-dHICA: a deep transformer-based model enables accurate histone imputation from chromatin accessibility
+a deep transformer-based model enables accurate histone imputation from chromatin accessibility
 
 Cloud Computing Service:
 -------------------------
