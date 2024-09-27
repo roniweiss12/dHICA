@@ -5,14 +5,13 @@ import numpy as np
 import os
 import json
 import functools
-from model_enfo import Enformer as Enforme_R
-from model_enfo import Enformer as Enforme_D
-from model_enfo import Enformer as Enforme_RD
+
+from model_dHICA import dHICA
 import time
 from operator import itemgetter
 import subprocess
 from optparse import Option, OptionParser
-
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 def get_metadata(data_path):
@@ -22,7 +21,6 @@ def get_metadata(data_path):
     path = os.path.join(data_path, 'statistics.json')
     with tf.io.gfile.GFile(path, 'r') as f:
         return json.load(f)
-
 
 def tfrecord_files(data_path, subset):
     # Sort the values by int(*).
@@ -141,25 +139,25 @@ def evaluate_model(model, dataset, chr_length_human, ID_to_chr_dict, max_steps=N
         if max_steps is not None and i > max_steps:
             break
         predicted = distributed_predict_step(batch)
+        predicted = predicted.numpy()
+        start_end = batch['start-end'].numpy()
 
-        predicted = predicted.values
-        start_end = batch['start-end'].values
-        for i in range(len(predicted)):
+        for i in range(len(predicted[0])):
             result = {}
-
+            # len_dataset += 1
             try:
-                chr_id = start_end[i][0][0].numpy()[0]
+                chr_id = start_end[i][0][0]
             except:
                 continue
 
             chr = ID_to_chr_dict[str(chr_id)]
-            result['start'] = start_end[i][0][0].numpy()[1] + 40960
-            result['end'] = start_end[i][0][0].numpy()[2] - 40960
-            result['predicted'] = predicted[i][0].numpy()
+            result['start'] = start_end[i][0][1] + 40960
+
+            result['end'] = start_end[i][0][2] - 40960
+            result['predicted'] = predicted[i]
             results[chr].append(result)
 
     return results
-
 
 mirrored_strategy = tf.distribute.MirroredStrategy()
 
@@ -206,27 +204,12 @@ def main():
 
     # choose model
     with mirrored_strategy.scope():
-        if options.modelType == 'R':
-            model = Enforme_R(channels=768,
+        model = dHICA(channels=768,
                              num_heads=8,
                              num_transformer_layers=11,
                              pooling_type='max')
-            weight_path = os.path.join(options.model_path, 'model.ckpt')
-            model.load_weights(weight_path)
-        elif options.modelType == 'D':
-            model = Enforme_D(channels=768,
-                             num_heads=8,
-                             num_transformer_layers=11,
-                             pooling_type='max')
-            weight_path = os.path.join(options.model_path, 'model.ckpt')
-            model.load_weights(weight_path)
-        else:
-            model = Enforme_RD(channels=768,
-                             num_heads=8,
-                             num_transformer_layers=11,
-                             pooling_type='max')
-            weight_path = os.path.join(options.model_path, 'model.ckpt')
-            model.load_weights(weight_path)
+        weight_path = os.path.join(options.model_path, 'model.ckpt')
+        model.load_weights(weight_path)
 
     # load dataset
     dataset = get_dataset(options.dataset, 'train').batch(global_batch_size).prefetch(2)
@@ -242,6 +225,7 @@ def main():
     pre_out = options.output_pre + '-' + options.modelType
 
     # write results to file.bedgraph
+    #print(results)
     write_bedGraph(results, out_path, chr_length_human, pre_out, is_chr22=False)
     
     # .bedgraph to .bw

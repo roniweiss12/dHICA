@@ -1,7 +1,7 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-
+from optparse import Option, OptionParser
 import random
 import tensorflow as tf
 from tqdm import tqdm
@@ -12,7 +12,7 @@ import time
 import glob
 import json
 import functools
-from model_enfo import Enformer
+from model_dHICA import dHICA
 import datetime
 import tensorboard
 import random
@@ -26,7 +26,7 @@ def get_metadata(organism):
     # Keys:num_targets,num_atac,atac_length,seq_length, pool_width,crop_bp,target_length
     # num_targets, train_seqs, valid_seqs, test_seqs, seq_length,
     # pool_width, crop_bp, target_length
-    path = os.path.join(organism_path(organism), 'statistics.json')
+    path = os.path.join(organism, 'statistics.json')  
     with tf.io.gfile.GFile(path, 'r') as f:
         return json.load(f)
 
@@ -34,7 +34,7 @@ def get_metadata(organism):
 def tfrecord_files(organism, subset):
     # Sort the values by int(*).
     return sorted(tf.io.gfile.glob(os.path.join(
-        organism_path(organism), 'tfrecords', f'{subset}-*.tfr'
+        organism, 'tfrecords', f'{subset}-*.tfr'  
     )), key=lambda x: int(x.split('-')[-1].split('.')[0]))
 
 
@@ -57,22 +57,18 @@ def deserialize(serialized_example, metadata):
     target = tf.reshape(target, (metadata['target_length'], metadata['num_targets']))
     target = tf.cast(target, tf.float32)
 
-    return{
+    return {
         'sequence': sequence,
         'atac-seq': atac,
         'target': target
     }
 
 
-def organism_path(organism):
-    return os.path.join('/local/ww/enformer/enformer_data/k562', organism)
-
 def get_dataset(organism, subset, num_threads=8):
-    metadata = get_metadata(organism)
+    metadata = get_metadata(organism) 
     dataset = tf.data.TFRecordDataset(tfrecord_files(organism, subset),
                                       compression_type='ZLIB',
                                       num_parallel_reads=num_threads)
-    # print(tfrecord_files(organism, subset))
     dataset = dataset.map(functools.partial(deserialize, metadata=metadata),
                           num_parallel_calls=num_threads)
     return dataset
@@ -273,9 +269,6 @@ def create_step_function(model, optimizer):
   def train_step(batch, head, optimizer_clip_norm_global=0.2):
     with tf.GradientTape() as tape:
       outputs = model(batch['sequence'], batch['atac-seq'], is_training=True)[head]
-      # print(outputs)
-      # print(outputs.shape)
-      # print(batch['target'])
       loss = tf.reduce_mean(
         # tf.keras.losses.poisson(batch['target'], outputs))
         tf.keras.losses.MSE(batch['target'], outputs))
@@ -292,27 +285,37 @@ def create_step_function(model, optimizer):
   return train_step
 
 
+import argparse
+
 def main():
+    parser = argparse.ArgumentParser(description='Process data path for training.')
+    parser.add_argument('--data_path', type=str, required=True, help='Path to the training data.')
+
+    args = parser.parse_args()
+
+    data_train = args.data_path
+    print(f"Training data path provided: {data_train}")
+
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = r'/home/dut_ww/enformer/model_code/logs/' + current_time + '1536_4'
+    log_dir = r'/local/ww/' + current_time + '1536_4'
 
     max_correlation = 0
 
     summary_writer = tf.summary.create_file_writer(log_dir)
 
-    human_dataset = get_dataset('atac', 'train').batch(1).repeat().prefetch(2)
+    human_dataset = get_dataset(data_train, 'train').batch(1).repeat().prefetch(2)
 
     learning_rate = tf.Variable(0.0001, trainable=False, name='learning_rate')
     optimizer = tf.optimizers.Adam(learning_rate=learning_rate)
     num_warmup_steps = 2500
     target_learning_rate = 0.0001
 
-    model = Enformer(channels=1536 // 2,  # // 4 Use 4x fewer channels to train faster.
+    model = dHICA(channels=1536 // 2,  # // 4 Use 4x fewer channels to train faster.
                               num_heads = 8,
                               num_transformer_layers = 11,
                               pooling_type='max')
     train_step = create_step_function(model, optimizer)
-    steps_per_epoch = 87868
+    steps_per_epoch = 80000
     num_epochs = 300
     data_it = iter(human_dataset) 
     global_step = 0 
@@ -320,7 +323,7 @@ def main():
         step = 0
         random_list = random.sample(list(range(steps_per_epoch)), 3000) 
         loss_train = 0
-        for i in tqdm(range(steps_per_epoch)):  #tqdm()-进度条
+        for i in tqdm(range(steps_per_epoch)):
             if i in random_list:
                 global_step += 1
                 if global_step > 1:
@@ -339,7 +342,7 @@ def main():
                 batch_human = next(data_it)
 
         metrics_human, loss_human_val = evaluate_model(model,
-                                       dataset=get_dataset('atac', 'valid').batch(1).prefetch(2),
+                                       dataset=get_dataset(data_train, 'valid').batch(1).prefetch(2),
                                        head='human',
                                        max_steps=1000)
 

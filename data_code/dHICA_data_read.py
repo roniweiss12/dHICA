@@ -16,11 +16,7 @@ import scipy.interpolate
 
 from dHICA_data import ModelSeq
 
-"""
-dHICA_data_read.py
 
-Read sequence values from coverage files.
-"""
 
 ################################################################################
 # main
@@ -66,7 +62,7 @@ def main():
   else:
     genome_cov_file = args[0]
     seqs_bed_file = args[1]
-    seqs_cov_file = args[2] # h5文件
+    seqs_cov_file = args[2]
 
   assert(options.crop_bp >= 0)
 
@@ -91,7 +87,6 @@ def main():
 
   # initialize sequences coverage file
   seqs_cov_open = h5py.File(seqs_cov_file, 'w')
-  # seqs_cov_open.create_dataset('targets', shape=(num_seqs, target_length), dtype='float16')
   targets = []
 
   # open genome coverage file
@@ -109,7 +104,7 @@ def main():
       print((mseq.chr, mseq.start, mseq.end))
       print('an error')
       exit()
-    # interpolate NaN
+
     if options.interp_nan:
       seq_cov_nt = interp_nan(seq_cov_nt)
 
@@ -120,7 +115,7 @@ def main():
     else:
       baseline_cov = 0
 
-    # set blacklist to baseline
+
     if mseq.chr in black_chr_trees:
       for black_interval in black_chr_trees[mseq.chr][mseq.start:mseq.end]:
         # adjust for sequence indexes
@@ -138,8 +133,9 @@ def main():
     # crop
     if options.crop_bp > 0:
       seq_cov_nt = seq_cov_nt[options.crop_bp:-options.crop_bp]
-    # sum pool
+
     seq_cov_nt = seq_cov_nt[8192:-8192]
+
     seq_cov = seq_cov_nt.reshape(target_length, options.pool_width)
 
     if options.sum_stat == 'sum':
@@ -182,8 +178,7 @@ def main():
   extreme_clip = np.percentile(targets, 100*options.clip_pct)
   targets = np.clip(targets, -extreme_clip, extreme_clip)
 
-  # write all
-  # print(targets.shape)
+
   seqs_cov_open.create_dataset('targets', data=targets, dtype='float16')
 
   # close genome coverage file

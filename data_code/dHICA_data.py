@@ -29,8 +29,6 @@ except ModuleNotFoundError:
     pass
 
 '''
-dHICA_data.py
-
 Compute model sequences from the genome, extracting DNA coverage values.
 '''
 
@@ -50,22 +48,22 @@ def first_five(path):
             continue
         if not (section[0] == 'chr22'):
             if section[-2] == 'train':
-                train_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                train_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
             elif section[-2] == 'valid':
-                valid_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                valid_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
             else:
-                test_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                test_set.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
         else:
             if section[-2] == 'train':
-                train_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                train_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
             elif section[-2] == 'valid':
-                valid_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                valid_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
             else:
-                test_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'protype': section[4]})
+                test_chr22.append({'chr': section[0], 'start': section[1], 'end': section[2], 'seqtype': section[4]})
     return train_set, valid_set, test_set, train_chr22, valid_chr22, test_chr22
 
 
-def add_protype(path, protype, chromsome):
+def add_seqtype(path, seqtype, chromsome):
     with open(path, 'r') as r_obj:
         sections = r_obj.readlines()
     sections = [section.split()[:4] for section in sections]
@@ -73,12 +71,12 @@ def add_protype(path, protype, chromsome):
         if chromsome is None:
             for section in sections:
                 w_obj.write(
-                    section[0] + '\t' + section[1] + '\t' + section[2] + '\t' + section[3] + '\t' + protype + '\n')
+                    section[0] + '\t' + section[1] + '\t' + section[2] + '\t' + section[3] + '\t' + seqtype + '\n')
         else:
             for section in sections:
                 if section[0] == chromsome:
                     w_obj.write(
-                        section[0] + '\t' + section[1] + '\t' + section[2] + '\t' + section[3] + '\t' + protype + '\n')
+                        section[0] + '\t' + section[1] + '\t' + section[2] + '\t' + section[3] + '\t' + seqtype + '\n')
 
 
 def split_contigs(chrom_segments, gaps_file):
@@ -115,8 +113,7 @@ def split_contigs(chrom_segments, gaps_file):
 
         # consider only if its in our genome
         if chrom in chrom_events:
-            # if语句是后加的
-            # if gend < cend:
+
             chrom_events[chrom].append((gstart, 'gstart'))
             chrom_events[chrom].append((gend, 'Gend'))
 
@@ -161,7 +158,7 @@ def split_contigs(chrom_segments, gaps_file):
 
 ################################################################################
 def main():
-    usage = 'usage: %prog [options] <fasta_file> <targets_file>'
+    usage = 'usage: %prog [options] <fasta_file> <seq_file> <targets_file>'
     parser = OptionParser(usage)
     parser.add_option('-b', dest='blacklist_bed',
                       help='Set blacklist nucleotides to a baseline value.')
@@ -215,10 +212,10 @@ def main():
                       default=False, action='store_true',
                       help='Exit after split. [Default: %default]')
     parser.add_option('--stride', '--stride_train', dest='stride_train',
-                      default=1., type='float',
+                      default=114688., type='float',
                       help='Stride to advance train sequences [Default: seq_length]')
     parser.add_option('--stride_test', dest='stride_test',
-                      default=1., type='float',
+                      default=114688., type='float',
                       help='Stride to advance valid and test sequences [Default: seq_length]')
     parser.add_option('-t', dest='test_pct_or_chr',
                       default=0.1, type='str',
@@ -241,10 +238,6 @@ def main():
                       default=0.1, type='str',
                       help='Proportion of the data for validation [Default: %default]')
 
-    parser.add_option('--pro', dest='protype',
-                      default='G1', type='str',
-                      help='Protype of ro-seq data [Default: %default]')
-
     parser.add_option('--chr', dest='chromsome',
                       default=None, type='str',
                       help='the Chromsome you choosed [Default: %default]')
@@ -254,18 +247,16 @@ def main():
                       help='Is mouse?')
     (options, args) = parser.parse_args()
 
-    if len(args) != 2:
+    if len(args) != 3:
         parser.error('Must provide FASTA, sample coverage and proseq labels and paths.')
     else:
         fasta_file = args[0]
-        targets_file = args[1]
-
+        seq_file = args[1]
+        targets_file = args[2]
 
     random.seed(options.seed)
     np.random.seed(options.seed)
-    # print(options.snap)
-    # exit()
-    # option.break_t默认是none
+
     if options.break_t is not None and options.break_t < options.seq_length:
         print('Maximum contig length --break cannot be less than sequence length.', file=sys.stderr)
         exit(1)
@@ -315,17 +306,10 @@ def main():
         '''
         # remove gaps
         if options.gaps_file:
-            # 染色体上的一些没有和重叠群重叠的片段{'chr1': [(1,2)， （3,4), ...,]}
             chrom_contigs = split_contigs(chrom_contigs, options.gaps_file)
-
-            # print(chrom_contigs)
-            # exit()
-        # print(len(chrom_contigs))
-        # ditch the chromosomes for contigs
 
         contigs = []
         for chrom in chrom_contigs:
-            # if是后加的
             if (not chrom.startswith('chrUn')) and ('_' not in chrom) and (chrom != 'chrM') and (
                     chrom != 'chrEBV') and (chrom != 'chrMT') and (chrom != 'chrY'):
                 contigs += [Contig(chrom, ctg_start, ctg_end)
@@ -334,10 +318,7 @@ def main():
         print(len(contigs))
         for ctg in contigs:
             print(ctg.chr)
-        # exit(1)
 
-        # limit to a BED file
-        # Limit to contigs overlapping the given BED
         if options.limit_bed is not None:
             contigs = limit_contigs(contigs, options.limit_bed)
 
@@ -346,14 +327,9 @@ def main():
             peaks_bed = curate_peaks(targets_df, options.out_dir, options.pool_width, options.crop_bp)
             contigs = limit_contigs(contigs, peaks_bed)
 
-        # filter for large enough
-        # 把比seq_length长的重叠群留下
         seq_tlength = options.seq_length - 2 * options.crop_bp
         contigs = [ctg for ctg in contigs if ctg.end - ctg.start >= seq_tlength]
 
-        # print(len(contigs))
-        # break up large contigs
-        # break_t = 786432
         if options.break_t is not None:
             contigs = break_large_contigs(contigs, options.break_t)
 
@@ -503,8 +479,7 @@ def main():
 
     # ------------------------------------------------------------------------------------------------------------------
 
-    add_protype(seqs_bed_file, options.protype, options.chromsome)
-
+    add_seqtype(seqs_bed_file, options.seqtype, options.chromsome)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -537,7 +512,7 @@ def main():
         if options.restart and os.path.isfile(seqs_cov_file):
             print('Skipping existing %s' % seqs_cov_file, file=sys.stderr)
         else:
-            cmd = 'python /local/ww/enformer/data_code/dnase/basenji_data_read.py'
+            cmd = 'python dHICA_data_read.py'
             # cmd += ' --crop %d' % options.crop_bp
             cmd += ' -w %d' % options.pool_width
             cmd += ' -u %s' % targets_df['sum_stat'].iloc[ti]
@@ -553,9 +528,7 @@ def main():
             cmd += ' %s' % genome_cov_file # fasta文件
             cmd += ' %s' % seqs_bed_file  # sequence.bed
             cmd += ' %s' % seqs_cov_file
-            # print(seqs_cov_file)
-            # print(cmd)
-            # print(zzx)
+
             if options.run_local:
                 # breaks on some OS
                 # cmd += ' &> %s.err' % seqs_cov_stem
@@ -589,7 +562,7 @@ def main():
 
     #fold_labels = ['train']
     for fold_set in fold_labels:
-        fold_set_indexes = [i for i in range(len(mseqs)) if mseqs[i].label == fold_set] # 挑出mseq里面分别挑出train数据，以及其对应的index
+        fold_set_indexes = [i for i in range(len(mseqs)) if mseqs[i].label == fold_set] 
         print(fold_set_indexes)
         print(fold_set)
         print(len(mseqs))
@@ -603,13 +576,12 @@ def main():
 
         while tfr_start <= fold_set_end:
             tfr_stem = '%s/%s-%d' % (tfr_dir, fold_set, tfr_i)
-            cmd = 'python /local/ww/enformer/data_code/dnase/basenji_data_write.py'
+            cmd = 'python dHICA_data_write.py'
             cmd += ' -s %d' % tfr_start
             cmd += ' -e %d' % tfr_end
-            cmd += ' --umap_clip %f' % options.umap_clip # default = 1
+            cmd += ' --umap_clip %f' % options.umap_clip  # default = 1
             cmd += ' -x %d' % options.crop_bp
-            # if options.zzx:
-            #   cmd += ' --zzx'
+
             if options.mouse:
                 cmd += ' --mouse'
             if options.umap_tfr:
@@ -620,11 +592,12 @@ def main():
             cmd += ' %s' % fasta_file
             cmd += ' %s' % seqs_bed_file
             cmd += ' %s' % seqs_cov_dir
+            cmd += ' %s' % seq_file 
             cmd += ' %s.tfr' % tfr_stem
 
+
             if options.run_local:
-                # breaks on some OS
-                # cmd += ' &> %s.err' % tfr_stem
+
                 write_jobs.append(cmd)
             else:
                 j = slurm.Job(cmd,
@@ -638,7 +611,7 @@ def main():
             tfr_i += 1
             tfr_start += options.seqs_per_tfr
             tfr_end = min(tfr_start + options.seqs_per_tfr, fold_set_end)
-    # print(write_jobs)
+    print(write_jobs)
     # exit()
     if options.run_local:
         util.exec_par(write_jobs, options.processes, verbose=True)
@@ -649,9 +622,7 @@ def main():
     ################################################################
     # stats
     ################################################################
-    # with open(proseq_id_file, 'r') as r_obj:
-    #   proseq_id = r_obj.readlines()
-    # num_proseq = len(proseq_id)
+
     stats_dict = {}
     stats_dict['num_targets'] = targets_df.shape[0]
     stats_dict['num_atac'] = 1
@@ -1134,7 +1105,7 @@ def write_seqs_bed(bed_file, seqs, labels=False):
 ################################################################################
 Contig = collections.namedtuple('Contig', ['chr', 'start', 'end'])
 ModelSeq = collections.namedtuple('ModelSeq', ['chr', 'start', 'end', 'label'])
-ModelSeq_2 = collections.namedtuple('ModelSeq', ['chr', 'start', 'end', 'label', 'protype'])
+ModelSeq_2 = collections.namedtuple('ModelSeq', ['chr', 'start', 'end', 'label', 'seqtype'])
 
 ################################################################################
 if __name__ == '__main__':

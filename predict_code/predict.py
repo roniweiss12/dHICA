@@ -4,11 +4,11 @@ import os
 import random
 import pyBigWig
 from tensorflow.python.keras.backend import print_tensor
-from Roformer_data import genome
+from dHICA_data import genome
 
 
 
-def roformer_call(out_dir, atac, model_path, ref_genome=None, processes=8, multi=False):
+def dHICA_call(out_dir, atac, model_path, ref_genome=None, processes=8, multi=False):
   # get the working path and the path where the program is located
   work_path = os.getcwd()
   current_path = os.path.dirname(__file__)
@@ -16,7 +16,7 @@ def roformer_call(out_dir, atac, model_path, ref_genome=None, processes=8, multi
   ################################################################################
   # make dataset
   ################################################################################
-  roformer_data_path = os.path.join(current_path, 'Roformer_data.py')
+  dHICA_data_path = os.path.join(current_path, 'dHICA_data.py')
 
    # make directory of dataset
   random_id = random.randint(0, 99999)
@@ -27,13 +27,8 @@ def roformer_call(out_dir, atac, model_path, ref_genome=None, processes=8, multi
       random_id = random.randint(0, 99999)
       dataset_outpath = os.path.join(work_path, str(random_id))
 
-  # user provid reference genome file
-  if not(ref_genome):
-    cmd_data_make = ['python', roformer_data_path, '--local','-o', dataset_outpath, '-p', str(processes), 
-        '--ref', 'None', atac]
-  # user does not provide reference genome file
-  else:
-    cmd_data_make = ['python', roformer_data_path, '--local','-o', dataset_outpath, '-p', str(processes), 
+
+  cmd_data_make = ['python', dHICA_data_path, '--local','-o', dataset_outpath, '-p', str(processes), 
       '--ref', ref_genome, atac]
   
   # call
@@ -117,7 +112,7 @@ def main():
     ################################################################################
     # make dataset
     ################################################################################
-    roformer_data_path = os.path.join(current_path, 'Roformer_data.py')
+    dHICA_data_path = os.path.join(current_path, 'dHICA_data.py')
     
     # make directory of dataset
     random_id = random.randint(0, 99999)
@@ -130,8 +125,7 @@ def main():
 
     # user provid reference genome file
     if not(options.ref_genome):
-      cmd_data_make = ['python', roformer_data_path, '--local','-o', dataset_outpath, '-p', str(options.processes), 
-          '--ref', 'None', options.atac]
+      print('Please provide fasta file of reference genome.')
     # user does not provide reference genome file
     else:
       fasta_length = genome.load_chromosomes(options.ref_genome)
@@ -146,7 +140,7 @@ def main():
           print('################################################################################')
           exit()
 
-      cmd_data_make = ['python', roformer_data_path, '--local','-o', dataset_outpath, '-p', str(options.processes), 
+      cmd_data_make = ['python', dHICA_data_path, '--local','-o', dataset_outpath, '-p', str(options.processes), 
         '--ref', options.ref_genome, options.atac]
     
     # call
@@ -156,13 +150,9 @@ def main():
     ################################################################################
     # predict
     ################################################################################
-    # use multiple GPUs
-    if options.multi:
-      predict_code_path = os.path.join(current_path, 'predicted.py')
-    # use one GPU
-    else:
-      predict_code_path = os.path.join(current_path, 'one_predicted.py')
-    
+
+    predict_code_path = os.path.join(current_path, 'predicted.py')
+
     # make directory of result
     if not(os.path.isdir(options.out_dir)):
       os.mkdir(options.out_dir)
@@ -170,24 +160,18 @@ def main():
     if not(os.path.isdir(output)):
       os.mkdir(output)
 
-    # choose model type
-    if not(options.ref_genome):
-      model_types = ['R']
-    else:
-      model_types = ['RD', 'R', 'D']
-
     # predict
-    for model_type in model_types:
-        cmd_predicted = ['python', predict_code_path, '-d', dataset_outpath, '--model_type', model_type, '--idx', os.path.join(dataset_outpath, 'chr_length.bed'), 
+
+      cmd_predicted = ['python', predict_code_path, '-d', dataset_outpath, '--idx', os.path.join(dataset_outpath, 'chr_length.bed'), 
             '--idx_chr', os.path.join(dataset_outpath, 'contigs.bed'), '-o', output, '--op', options.output_pre, '-m', options.model_path]
-        print(cmd_predicted)
-        subprocess.call(cmd_predicted)
+      print(cmd_predicted)
+      subprocess.call(cmd_predicted)
 
     print('The result is in the %s' % output)
 
-    ## delete the file of dataset
-    cmd_rm = ['rm', '-rf', dataset_outpath]
-    subprocess.call(cmd_rm)
+    # delete the file of dataset
+    #cmd_rm = ['rm', '-rf', dataset_outpath]
+    #subprocess.call(cmd_rm)
 
 
 

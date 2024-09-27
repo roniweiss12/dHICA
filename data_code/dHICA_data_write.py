@@ -14,17 +14,12 @@ from dna_io import dna_1hot, dna_1hot_index
 
 import tensorflow as tf
 from sklearn.preprocessing import MinMaxScaler
-"""
-dHICA_data_write.py
-Write TF Records for batches of model sequences.
-
-"""
 
 ################################################################################
 # main
 ################################################################################
 def main():
-  usage = 'usage: %prog [options] <fasta_file> <seqs_bed_file> <seqs_cov_dir> <tfr_file>'
+  usage = 'usage: %prog [options] <fasta_file> <seqs_bed_file> <seqs_cov_dir> <seq_file> <tfr_file>'
   parser = OptionParser(usage)
   parser.add_option('-s', dest='start_i',
       default=0, type='int',
@@ -50,13 +45,14 @@ def main():
       help='Is mouse?')
   (options, args) = parser.parse_args()
 
-  if len(args) != 4:
+  if len(args) != 5:
     parser.error('Must provide input arguments.')
   else:
     fasta_file = args[0]
     seqs_bed_file = args[1]
     seqs_cov_dir = args[2]
-    tfr_file = args[3]
+    seq_file = args[3] # id.txt
+    tfr_file = args[4] #tfr_stem (tfr_dir, fold_set, tfr_i)
 
   # exit()
   ################################################################
@@ -65,7 +61,7 @@ def main():
   model_seqs = []
   for line in open(seqs_bed_file):
     a = line.split()
-    model_seqs.append(ModelSeq_2(a[0],int(a[1]),int(a[2]), a[3], a[4])) #['chr', 'start', 'end', 'label', 'protype']
+    model_seqs.append(ModelSeq_2(a[0],int(a[1]),int(a[2]), a[3], a[4]))
 
   if options.end_i is None:
     options.end_i = len(model_seqs)
@@ -96,8 +92,6 @@ def main():
 
   # initialize targets
   # targets = np.zeros((num_seqs, 1028, num_targets), dtype='float16')
-  # 原来的
-  # seq_pool_len是8192
   targets = np.zeros((num_seqs, seq_pool_len, num_targets), dtype='float16')
 
   # read each target
@@ -140,18 +134,17 @@ def main():
       mseq = model_seqs[msi]
       mseq_start = mseq.start - options.extend_bp
       mseq_end = mseq.end + options.extend_bp
-
-      # read FASTA
       mseq_start = mseq_start - 32768
       mseq_end = mseq_end + 32768
-      seq_dna = fetch_dna(fasta_open, mseq.chr, mseq_start, mseq_end)#处理超出track范围的sequence
-      # print(tfr_file, si, mseq.chr, len(seq_dna), mseq.start, mseq.end)
-      # print(seq_dna[:10])
-      # one hot code (N's as zero)
+      seq_dna = fetch_dna(fasta_open, mseq.chr, mseq_start, mseq_end)
+
       seq_1hot = dna_1hot(seq_dna, n_uniform=False, n_sample=False)
-      atac_seq = np.asarray(get_atac_seq( mseq.chr, mseq_start, mseq_end, mseq.protype)) #根据不同的protype读取不同的bw文件
+
+      atac_seq = np.asarray(get_atac_seq(seq_file, mseq.chr, mseq_start, mseq_end, mseq.seqtype)) #根据不同的seqtype读取不同的bw文件
 
       # hash to bytes
+      
+
       atac_seq = abs(atac_seq)
 
       targets_n = targets[si,:,:]
@@ -188,21 +181,12 @@ def main():
     fasta_open.close()
 
 
-def get_atac_seq(chr, start, end, protype):
+def get_atac_seq(seq_file, chr, start, end, seqtype):
   atac_seq = []
-  # with open(proseq_id_file, 'r') as r_obj:
-  #   genome_cov_files = r_obj.readlines()
-  # for genome_cov_file in genome_cov_files:
-  # genome_cov_file = genome_cov_file[:-1]
-
-  genome_cov_file = '/local/ww/enformer/enformer_data/epigenomes/bigWig/' + protype + '-DNase.fc.signal.bigwig'
-
-  # genome_cov_file_plus = '/local/hg19_data/proseq/' + protype + '_plus.bw'
   try:
-    genome_cov_open = br.CovFace(genome_cov_file)
-    #genome_cov_open_plus = br.CovFace(genome_cov_file_plus)
+    genome_cov_open = br.CovFace(seq_file)
   except:
-    print('111', protype)
+    print('111', seqtype)
     exit()
 
   p_start = start if start > 0 else 0
@@ -210,36 +194,66 @@ def get_atac_seq(chr, start, end, protype):
 
   try:
     seq_cov_nt = genome_cov_open.read(chr, p_start, p_end)
-    #seq_cov_nt_plus = genome_cov_open_plus.read(chr, p_start, p_end)
   except:
     print(chr, start, end)
     print(chr, p_start, p_end)
     exit()
 
   baseline_cov = np.percentile(seq_cov_nt, 100 * 0.5)
-  #baseline_cov_plus = np.percentile(seq_cov_nt_plus, 100 * 0.5)
 
   baseline_cov = np.nan_to_num(baseline_cov)
-  #baseline_cov_plus = np.nan_to_num(baseline_cov_plus)
 
   nan_mask = np.isnan(seq_cov_nt)
-  #nan_mask_plus = np.isnan(seq_cov_nt_plus)
 
   seq_cov_nt[nan_mask] = baseline_cov
-  #seq_cov_nt_plus[nan_mask_plus] = baseline_cov_plus
 
   seq_cov_nt = np.hstack((np.zeros(abs(start - p_start)), seq_cov_nt))
   seq_cov_nt = np.hstack((seq_cov_nt, np.zeros(abs(end - p_end)))).astype('float16')
 
-  #seq_cov_nt_plus = np.hstack((np.zeros(abs(start - p_start)), seq_cov_nt_plus))
-  #seq_cov_nt_plus = np.hstack((seq_cov_nt_plus, np.zeros(abs(end - p_end)))).astype('float16')
-
-  #proseq_minus_plus = abs(seq_cov_nt_minus) + abs(seq_cov_nt_plus)
-
   atac_seq.append(seq_cov_nt)
-  #pro_seq_plus.append(seq_cov_nt_plus)
-  #pro_seq_minus_plus.append(proseq_minus_plus)
+
   return atac_seq
+
+def get_atac_seq1(atac_id_file, chr, start, end, seqtype):
+  atac_seq = []
+  with open(atac_id_file, 'r') as r_obj:
+    genome_cov_files = r_obj.readlines()
+  genome_cov_files = [line.strip("\n") for line in genome_cov_files]
+
+  for genome_cov_file in genome_cov_files:
+    genome_cov_file = genome_cov_file[:]
+    try:
+      genome_cov_open = br.CovFace(genome_cov_file)
+    except:
+      print('111', seqtype)
+      exit()
+
+    p_start = start if start > 0 else 0
+    p_end = end if end < chr_length_human[chr] else chr_length_human[chr]
+
+    try:
+      seq_cov_nt = genome_cov_open.read(chr, p_start, p_end)
+    except:
+      print(chr, start, end)
+      print(chr, p_start, p_end)
+      exit()
+
+    baseline_cov = np.percentile(seq_cov_nt, 100 * 0.5)
+
+    baseline_cov = np.nan_to_num(baseline_cov)
+
+    nan_mask = np.isnan(seq_cov_nt)
+
+    seq_cov_nt[nan_mask] = baseline_cov
+
+    seq_cov_nt = np.hstack((np.zeros(abs(start - p_start)), seq_cov_nt))
+    seq_cov_nt = np.hstack((seq_cov_nt, np.zeros(abs(end - p_end)))).astype('float16')
+
+    atac_seq.append(seq_cov_nt)
+
+  return atac_seq
+
+
 
 def fetch_dna(fasta_open, chrm, start, end):
   """Fetch DNA when start/end may reach beyond chromosomes."""
@@ -280,10 +294,6 @@ def normali(Z):
   out = Z/norm
   return out
 
-# def normali_column(Z):
-#   norm = np.linalg.norm(Z, axis=0)
-#   out = Z/norm
-#   return out
 
 def normali_column(Z):
   Zmax,Zmin=Z.max(axis=1),Z.min(axis=1)
