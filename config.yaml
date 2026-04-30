@@ -1,0 +1,9 @@
+# config.yaml
+slurm:
+  job_name: dHICA_predict_cpu         # The name of the SLURM job
+  partition: artemis                  # The SLURM partition to use
+  cpus_per_task: 24                   # Number of CPUs to allocate per task
+  memory: 64G                         # Memory allocation for the job
+  time: "48:00:00"                    # Maximum wall time for the job (HH:MM:SS)
+  output_log: "logs/{wildcards.job_name}_{wildcards.job_id}.out"  # Output log file path
+  error_log: "logs/{wildcards.job_name}_{wildcards.job_id}.err"   # Error log file path
