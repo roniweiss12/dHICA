@@ -11,7 +11,7 @@ import time
 from operator import itemgetter
 import subprocess
 from optparse import Option, OptionParser
-os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+#os.environ["CUDA_VISIBLE_DEVICES"] = '2'
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 def get_metadata(data_path):
@@ -67,57 +67,96 @@ def get_dataset(data_path, subset, num_threads=8):
 
 
 def write_bedGraph(results, out_path, chr_length_human, pre_out, is_chr22=False):
+    from operator import itemgetter
+    import numpy as np
+    import os
+
+    # Open all files once
+    file_handles = {}
+    buffers = {}
+
+    for histone in histone_list:
+        path = os.path.join(out_path, f"{pre_out}-{histone}.bedgraph")
+        file_handles[histone] = open(path, 'w')
+        buffers[histone] = []
+
+    BUFFER_LIMIT = 100000  # tune if needed
+
+    def flush(histone):
+        if buffers[histone]:
+            file_handles[histone].writelines(buffers[histone])
+            buffers[histone] = []
+
     for chr in results:
-        chr_result = results[chr]
-        chr_result = sorted(chr_result, key=itemgetter('start'))
+        chr_result = sorted(results[chr], key=itemgetter('start'))
 
-        for j in range(len(histone_list)):
-            with open(os.path.join(out_path, pre_out + '-' + histone_list[j] + '.bedgraph'), 'a') as w_obj:
+        if not chr_result:
+            continue
+
+        for j, histone in enumerate(histone_list):
+
+            # Initial padding
+            if is_chr22:
+                if chr == 'chr22' and chr_result[0]['start'] > 0:
+                    buffers[histone].append(f"{chr}\t0\t{chr_result[0]['start']}\t0\n")
+            else:
+                if chr_result[0]['start'] > 0:
+                    buffers[histone].append(f"{chr}\t0\t{chr_result[0]['start']}\t0\n")
+
+            last_end = 0
+
+            for item in chr_result:
+                start_base = item['start']
+                end_base = item['end']
+                preds = item['predicted'][:, j]
+
+                starts = start_base + np.arange(896) * 128
+                ends = starts + 128
+
                 if is_chr22:
-                    if chr == 'chr22':
-                        if chr_result[0]['start'] > 0:
-                            w_obj.write(chr + '\t' + str(0) + '\t' + str(chr_result[0]['start']) + '\t' + str(0) + '\n')
-                    for item in chr_result:
-                        for i in range(896):
-                            start = item['start'] + i * 128
-                            end = start + 128
-                            w_obj.write(chr + '\t' + str(start) + '\t' + str(end) + '\t' + str(item['predicted'][i][j]) + '\n')
-                    if chr == 'chr22':
-                        if chr_result[-1]['end'] < chr_length_human[chr]:
-                            w_obj.write(chr + '\t' + str(chr_result[-1]['end']) + '\t' + str(chr_length_human[chr]) + '\t' + str(0) + '\n')
+                    # simpler path
+                    for s, e, v in zip(starts, ends, preds):
+                        buffers[histone].append(f"{chr}\t{s}\t{e}\t{v}\n")
                 else:
-                    try:
-                        if chr_result[0]['start'] > 0:
-                            w_obj.write(chr + '\t' + str(0) + '\t' + str(chr_result[0]['start']) + '\t' + str(0) + '\n')
-                    except:
-                        print(chr_result)
-                        print(chr)
+                    if start_base >= last_end:
+                        for s, e, v in zip(starts, ends, preds):
+                            buffers[histone].append(f"{chr}\t{s}\t{e}\t{v}\n")
+                    else:
+                        gap_h = last_end - start_base
+                        h_start = gap_h // 128
 
-                    last_end = 0
-                    for item in chr_result:
-                        if item['start'] >= last_end:
-                            for i in range(896):
-                                start = item['start'] + i * 128
-                                end = start + 128
-                                w_obj.write(chr + '\t' + str(start) + '\t' + str(end) + '\t' + str(item['predicted'][i][j]) + '\n')
-                        
-                        else:
-                            gap_h = last_end - item['start']
-                            h_start = gap_h // 128
-                            w_obj.write(chr + '\t' + str(last_end) + '\t' + str(item['start'] + 128 * (h_start+1)) + '\t' + str(item['predicted'][h_start][j]) + '\n')
-                            for i in range(h_start+1, 896):
-                                start = item['start'] + i * 128
-                                end = start + 128
-                                w_obj.write(chr + '\t' + str(start) + '\t' + str(end) + '\t' + str(item['predicted'][i][j]) + '\n')
-                        last_end = item['end']
-                        
+                        # overlap correction line
+                        buffers[histone].append(
+                            f"{chr}\t{last_end}\t{start_base + 128 * (h_start+1)}\t{preds[h_start]}\n"
+                        )
 
-                    try:
-                        if chr_result[-1]['end'] < chr_length_human[chr]:
-                            w_obj.write(chr + '\t' + str(chr_result[-1]['end']) + '\t' + str(chr_length_human[chr]) + '\t' + str(0) + '\n')
-                    except:
-                        print('an error', chr)
-                        
+                        for i in range(h_start + 1, 896):
+                            s = starts[i]
+                            e = ends[i]
+                            v = preds[i]
+                            buffers[histone].append(f"{chr}\t{s}\t{e}\t{v}\n")
+
+                last_end = end_base
+
+                # flush periodically
+                if len(buffers[histone]) >= BUFFER_LIMIT:
+                    flush(histone)
+
+            # Final padding
+            try:
+                if chr_result[-1]['end'] < chr_length_human[chr]:
+                    buffers[histone].append(
+                        f"{chr}\t{chr_result[-1]['end']}\t{chr_length_human[chr]}\t0\n"
+                    )
+            except:
+                print('an error', chr)
+
+            flush(histone)
+
+    # Close all files
+    for histone in histone_list:
+        flush(histone)
+        file_handles[histone].close()
 
 
 def evaluate_model(model, dataset, chr_length_human, ID_to_chr_dict, max_steps=None):
@@ -199,7 +238,7 @@ def main():
         os.mkdir(out_path)
 
     # set batchsize
-    batch_size_replica = 1
+    batch_size_replica = 16
     global_batch_size = batch_size_replica * mirrored_strategy.num_replicas_in_sync
 
     # choose model
@@ -212,7 +251,7 @@ def main():
         model.load_weights(weight_path)
 
     # load dataset
-    dataset = get_dataset(options.dataset, 'train').batch(global_batch_size).prefetch(2)
+    dataset = (get_dataset(options.dataset, 'train', num_threads=8).batch(global_batch_size, drop_remainder=False).prefetch(tf.data.AUTOTUNE))
     distributed_dataset = mirrored_strategy.experimental_distribute_dataset(dataset)
 
     # predict

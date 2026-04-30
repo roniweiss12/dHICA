@@ -100,7 +100,7 @@ def main():
 
         # read RO-seq signal
         atac_seq = np.asarray(get_atac_seq(atacseq_file, mseq.chr, mseq_start, mseq_end, chr_length_human))
-
+        print(atac_seq[0], atac_seq[0].min(), atac_seq[0].max(), atac_seq[0].mean())
         # absolute value
         atac_seq = abs(atac_seq)
 
@@ -188,41 +188,46 @@ def get_atac_seq(seq_file, chr, start, end, chr_length):
   """
   atac_seq = []
 
-  genome_cov_file = seq_file
-  # genome_cov_file_plus = roseq_plus_file
-
-  # build CovFace object
+    # open coverage file
   try:
-    genome_cov_open = CovFace(genome_cov_file)
-    # genome_cov_open_plus = CovFace(genome_cov_file_plus)
-  except:
-    print('an error when read ',genome_cov_file)
-    exit()
-  
-  # judge if the line is crossed
-  p_start = start if start > 0 else 0
-  p_end = end if end < chr_length[chr] else chr_length[chr]
+    genome_cov_open = CovFace(seq_file)
+  except Exception as e:
+    print(f"Error reading {seq_file}: {e}")
+    exit(1)
 
-  # read file
+    # clip coordinates to chromosome boundaries
+  p_start = max(0, start)
+  p_end = min(end, chr_length.get(chr, 0))
+
+    # read coverage
   try:
-    seq_cov_nt = genome_cov_open.read(chr, p_start, p_end)
-    # seq_cov_nt_plus = genome_cov_open_plus.read(chr, p_start, p_end)
-  except:
-    print(chr, start, end)
-    print(chr, p_start, p_end)
-    exit()
+    seq_cov_nt = genome_cov_open.read(chr, p_start, p_end).astype('float32')  # safer float32
+  except Exception as e:
+      print(f"Error reading {chr}:{p_start}-{p_end}: {e}")
+      exit(1)
 
-  # remove abnormal values
-  baseline_cov = np.percentile(seq_cov_nt, 100*0.5)
-  baseline_cov = np.nan_to_num(baseline_cov)
-  nan_mask = np.isnan(seq_cov_nt)
-  seq_cov_nt[nan_mask] = baseline_cov
+    # handle all-NaN or partially NaN slices
+  if np.all(np.isnan(seq_cov_nt)):
+      baseline_cov = 1e-3  # small default value for empty regions
+      seq_cov_nt[:] = baseline_cov
+  else:
+      baseline_cov = np.nanpercentile(seq_cov_nt, 50)  # median ignoring NaNs
+      seq_cov_nt = np.nan_to_num(seq_cov_nt, nan=baseline_cov)
 
-  # concatenate the out-of-bounds part and assign a value of 0 to the out-of-bounds part
-  seq_cov_nt = np.hstack((np.zeros(abs(start-p_start)), seq_cov_nt))
-  seq_cov_nt = np.hstack((seq_cov_nt, np.zeros(abs(end-p_end)))).astype('float16')
+    # absolute value (optional, matches previous code)
+  seq_cov_nt = np.abs(seq_cov_nt)
+
+    # add zeros for regions that were out-of-bounds
+  left_pad = max(0, p_start - start)
+  right_pad = max(0, end - p_end)
+  if left_pad > 0:
+      seq_cov_nt = np.hstack((np.zeros(left_pad, dtype='float32'), seq_cov_nt))
+  if right_pad > 0:
+      seq_cov_nt = np.hstack((seq_cov_nt, np.zeros(right_pad, dtype='float32')))
+
+    # convert to float16 for storage if desired
+  seq_cov_nt = seq_cov_nt.astype('float16')
   atac_seq.append(seq_cov_nt)
-
 
   return atac_seq
 

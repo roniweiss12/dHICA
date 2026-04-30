@@ -161,11 +161,10 @@ def main():
       os.mkdir(output)
 
     # predict
-
-      cmd_predicted = ['python', predict_code_path, '-d', dataset_outpath, '--idx', os.path.join(dataset_outpath, 'chr_length.bed'), 
+    cmd_predicted = ['python', predict_code_path, '-d', dataset_outpath, '--idx', os.path.join(dataset_outpath, 'chr_length.bed'), 
             '--idx_chr', os.path.join(dataset_outpath, 'contigs.bed'), '-o', output, '--op', options.output_pre, '-m', options.model_path]
-      print(cmd_predicted)
-      subprocess.call(cmd_predicted)
+    print(cmd_predicted)
+    subprocess.call(cmd_predicted)
 
     print('The result is in the %s' % output)
 

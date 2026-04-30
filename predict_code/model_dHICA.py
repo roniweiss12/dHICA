@@ -51,7 +51,7 @@ class Residual(tf.keras.Model):
         super(Residual, self).__init__(**kwargs)
         self._module = module
 
-    def __call__(self, inputs: tf.Tensor, training: bool) -> tf.Tensor:
+    def call(self, inputs: tf.Tensor, training: bool) -> tf.Tensor:
         return inputs + self._module(inputs, training=training)
 
     def get_config(self) -> Dict:
@@ -63,8 +63,6 @@ class Residual(tf.keras.Model):
         return input_shape
 
 class SoftmaxPooling1D(tf.keras.Model):
-    """Pooling operation with optional weights."""
-
     def __init__(
         self,
         pool_size: int = 2,
@@ -79,30 +77,22 @@ class SoftmaxPooling1D(tf.keras.Model):
         self._w_init_scale = w_init_scale
         self._logit_linear = None
 
-    def _initialize(self, num_features: int) -> None:
+    def build(self, input_shape) -> None:
+        num_features = input_shape[-1]
         self._logit_linear = tf.keras.layers.Dense(
             units=num_features if self._per_channel else 1,
-            use_bias=False,  # Softmax is agnostic to shifts.
+            use_bias=False,
             kernel_initializer=tf.keras.initializers.Identity(gain=self._w_init_scale),
         )
+        super(SoftmaxPooling1D, self).build(input_shape)
 
-    def get_config(self) -> Dict:
-        config = {
-            "pool_size": self._pool_size,
-            "per_channel": self._per_channel,
-            "w_init_scale": self._w_init_scale,
-        }
-        base_config = super().get_config()
-        return {**base_config, **config}
-
-    def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
+    def call(self, inputs: tf.Tensor) -> tf.Tensor:
         _, length, num_features = inputs.shape
-        self._initialize(num_features)
         inputs = tf.reshape(
             inputs, (-1, length // self._pool_size, self._pool_size, num_features)
         )
         return tf.reduce_sum(
-            inputs * tf.nn.softmax(self._logit_linear(inputs), axis=-2), 
+            inputs * tf.nn.softmax(self._logit_linear(inputs), axis=-2),
             axis=-2)
 
 def pooling_module(kind, pool_size):
@@ -247,7 +237,8 @@ class dHICA(tf.keras.Model):
                    name=f'conv_tower_block_{i}')
         for i, num_filters in enumerate(filter_list)], name='conv_tower_atac')
 
-    self.concat_x_atacseq = Sequential([tf.keras.layers.Dense(channels)], name='concat_x_atac')
+    self.concat_x_atacseq = tf.keras.layers.Dense(channels)
+    self.concat_x_atacseq.build((None, None, channels * 2))
     
 
     # Transformer.
